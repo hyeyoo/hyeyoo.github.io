@@ -6,26 +6,29 @@ categories: [Linux Kernel]
 tags: [kernel development, virtualization]
 ---
 
+## This article is Work In Progress
+
 # Intro
 
 This article shows how to set up your kernel test environment using libvirt, a toolkit to manage virtualization environments.
 
 ## Why use virtualized environment?
 
-One may wonder why you use virtualization. Why not test in a local machine? Well, I mostly use cloud instances or remote servers for kernel development and testing. When you develop in a remote server, installing and testing a new kernel becomes challenging because you may break your server by mistake.
+One may wonder why you use virtualization. Why not test in a local machine? Well, for me the biggest motivation is because I use remote servers for kernel development and testing. When you develop in a remote server, installing and testing a new kernel may break your server by mistake.
 
 Anyway, that's enough for an introduction - let's start!
 
 # Requirements
 
 -   Your CPU needs to support hardware virtualization extension (i.e. Intel VT-X / AMD SVM)
--   Ubuntu is assumed for your distribution.
+-   Ubuntu is assumed for your distribution in this article.
 
 # Install libvirt and relevant tools
 
 ```bash
-sudo apt install -y libvirt virt-manager virsh, etc)
+sudo apt install -y libvirt virsh qemu-kvm libvirt-daemon-system
 ```
+
 Also, download the pre-built ubuntu cloud image from [Ubuntu Cloud Images](https://cloud-images.ubuntu.com/) 
 
 ```bash
@@ -147,7 +150,7 @@ $ virt-install \
 Escape console with Ctrl + ],
 and check if VM is created successfully:
 
-``bash
+```bash
 $ virsh list
  Id   Name     State
 ------------------------
@@ -203,18 +206,17 @@ $ mount -t virtiofs virt /virt
 
 ### Mount virtiofs using /etc/fstab
 
-It's annoying to mount it every boot, so let's add the filesystem to /etc/fstab.
+It'd be annoying to mount it every booting, so let's add the filesystem to /etc/fstab.
 
 ```bash
 $ mkdir /virt
 $ echo 'virt /virt virtiofs rw,relatime 0 0' >> /etc/fstab
 ```
 
-# Setting up network
+# Setting up the network
 
-The Virtual Machine we created is part of virtual network called "default" because we passed over --network default to virt-install. and the network is NATed through the host.
-
-However the VM cannot connect to internet yet, because DHCP isn't set up. So let's setup DHCP.
+The Virtual Machine we created is connected to virtual network called "default" because we passed over --network default to virt-install. and the network is NATed through the host.
+However the VM cannot access internet yet, because DHCP isn't set up. So let's setup DHCP.
 
 ```bash
 cat > /etc/systemd/network/20-dhcp.network << EOF
@@ -230,4 +232,8 @@ EOF
 
 Now you can access internet after  ```systemctl restart systemd-networkd```.
 
-# Attaching a debugger to the VM
+# Building and installing new kernel
+
+
+# Attaching GDB to the VM
+
