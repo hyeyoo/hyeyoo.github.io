@@ -26,13 +26,13 @@ Anyway, that's enough for an introduction - let's start!
 ```bash
 sudo apt install -y libvirt virt-manager virsh, etc)
 ```
-Also, download pre-built ubuntu cloud image from [Ubuntu Cloud Images](https://cloud-images.ubuntu.com/) 
+Also, download the pre-built ubuntu cloud image from [Ubuntu Cloud Images](https://cloud-images.ubuntu.com/) 
 
 ```bash
 wget https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img
 ```
 
-# Resize downloaded image
+# Resize the downloaded image
 ```bash
 $ qemu-img info ./jammy-server-cloudimg-amd64.img
 image: ./jammy-server-cloudimg-amd64.img
@@ -47,7 +47,7 @@ refcount bits: 16
 ```
 If you check the downloaded image using 'qemu-img info', it's pretty small. Let's resize it.
 
-## What's partitions are in this image?
+## What partitions are in this image?
 
 Before resizing a disk partition, let's see what's root partition's name. (It's /dev/sda1)
 ```bash
@@ -59,6 +59,7 @@ Name Type VFS Label Size Parent
 ```
 
 ## Restrictions
+
 So how to resize it? To resize, you first need to increase the disk size (virtual size) and then adjust the root partition size. VM should be shut down when resizing. 
 
 ```bash
@@ -76,13 +77,13 @@ refcount bits: 16
 ```
 
 ```bash
-
 $ virt-filesystems -h --long -a ./jammy-server-cloudimg-amd64.img
 Name Type VFS Label Size Parent
 /dev/sda1 filesystem ext4 cloudimg-rootfs 2.0G -
 /dev/sda15 filesystem vfat UEFI 104M -
 ```
-We've just increased the disk size. But if you check the size of /dev/sda1, it remains the same. You need to adjust it to increased disk size using [virt-resize](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/virtualization_deployment_and_administration_guide/sect-guest_virtual_machine_disk_access_with_offline_tools-virt_resize_resizing_guest_virtual_machines_offline).
+
+We've just increased the disk size. But when you check the size of /dev/sda1, it remains the same. You need to adjust it to increased disk size using [virt-resize](https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/virtualization_deployment_and_administration_guide/sect-guest_virtual_machine_disk_access_with_offline_tools-virt_resize_resizing_guest_virtual_machines_offline).
 
  
 ```bash
@@ -121,14 +122,112 @@ Now the root partition is expanded. But there's one more thing left to do. Unfor
 
 
 # Changing root password
+
+Ubuntu cloud images have no default password. To log in, you need to set the root password.
+
 ```bash
-virt-customize -a ./img --root-password 'password:root'
+virt-customize -a ./outdisk.img --root-password 'password:root'
 ```
 
 # Creating VM with virt-install
 
+Let's create a new VM using virt-install:
+```bash
+$ virt-install \
+        --name ubuntu \
+        --memory 16384 \
+        --disk $1 \
+        --network default \
+        --import \
+        --os-variant ubuntu20.04 \
+        --vcpus 16 \
+        --nographics
+```
+
+Escape console with Ctrl + ],
+and check if VM is created successfully:
+
+``bash
+$ virsh list
+ Id   Name     State
+------------------------
+ 1    ubuntu   running
+```
+
+Good. you can connect to the console using:
+```bash
+$ virsh console ubuntu
+```
+
+But this time, let's shutdown the VM. We're gonna share a filesystem between the host and the guest.
 
 # Sharing host files with guest using virtiofs
-https://libvirt.org/kbase/virtiofs.html
+
+As you develop the kernel, you may need to share files between the host and the guest. For example, development is done in the host, but builds and tests are done by the guest, or data collected in the guest is shared to host.
+
+With [virtiofs](https://libvirt.org/kbase/virtiofs.html), you can easily create a filesystem that can be shared between them.
+
+To create it, you need to edit XML configuration file of your VM.
+
+```bash
+virsh edit
+```
+
+According to the virtiofs documentation, add <memoryBacking> and <filesystem> into the XML configuration.
+
+```
+<domain>
+  ...
+  <memoryBacking>
+    <source type='memfd'/>
+    <access mode='shared'/>
+  </memoryBacking>
+  ...
+  <devices>
+    ...
+    <filesystem type='mount' accessmode='passthrough'>
+      <driver type='virtiofs' queue='1024'/>
+      <source dir='/path/to/share/with/guest'/>
+      <target dir='virt'/>
+    </filesystem>
+    ...
+  </devices>
+</domain>
+```
+
+and then you can mount it:
+```bash
+$ mkdir /virt
+$ mount -t virtiofs virt /virt
+```
+
+### Mount virtiofs using /etc/fstab
+
+It's annoying to mount it every boot, so let's add the filesystem to /etc/fstab.
+
+```bash
+$ mkdir /virt
+$ echo 'virt /virt virtiofs rw,relatime 0 0' >> /etc/fstab
+```
+
+# Setting up network
+
+The Virtual Machine we created is part of virtual network called "default" because we passed over --network default to virt-install. and the network is NATed through the host.
+
+However the VM cannot connect to internet yet, because DHCP isn't set up. So let's setup DHCP.
+
+```bash
+cat > /etc/systemd/network/20-dhcp.network << EOF
+[Match]
+Name=enp*
+# for interface whose name starts with 'enp'
+
+[Network]
+DHCP=ipv4
+# Enable DHCP
+EOF
+```
+
+Now you can access internet after  ```systemctl restart systemd-networkd```.
 
 # Attaching a debugger to the VM
